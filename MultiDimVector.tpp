@@ -1,8 +1,10 @@
 #include "MultiDimVector.hpp"
 #include "ArrayBuilder.hpp"
+#include "IndexProxy.hpp"
 #include <iostream>
 #include <numeric>
 #include <sstream>
+#include <string>
 
 template<typename T>
 MultiDimVector<T>::MultiDimVector() : is_scalar(false) {}
@@ -22,6 +24,9 @@ void MultiDimVector<T>::from_builder(const ArrayBuilder<T>& builder)
         nested_data.clear();
         is_scalar = true;
         original_shape = {flat_data.size()};
+        if (flat_data.empty()) {
+            throw std::invalid_argument("MultiDimVector: empty flat data");
+        }
     } 
     else
     {
@@ -29,17 +34,17 @@ void MultiDimVector<T>::from_builder(const ArrayBuilder<T>& builder)
         nested_data.clear();
         original_shape.clear();
         original_shape.push_back(builder.nested_data.size());
-        if (!builder.nested_data.empty()) 
+        if (builder.nested_data.empty()) {
+            throw std::invalid_argument("MultiDimVector: empty nested data");
+        }
+        MultiDimVector<T> sub_vec(builder.nested_data[0]);
+        auto sub_shape = sub_vec.get_shape();
+        original_shape.insert(original_shape.end(), sub_shape.begin(), sub_shape.end());
+        for (const auto& sub_builder : builder.nested_data) 
         {
-            MultiDimVector<T> sub_vec(builder.nested_data[0]);
-            auto sub_shape = sub_vec.get_shape();
-            original_shape.insert(original_shape.end(), sub_shape.begin(), sub_shape.end());
-            for (const auto& sub_builder : builder.nested_data) 
-            {
-                MultiDimVector<T> sub_vec;
-                sub_vec.from_builder(sub_builder);
-                nested_data.push_back(sub_vec);
-            }
+            MultiDimVector<T> sub_vec;
+            sub_vec.from_builder(sub_builder);
+            nested_data.push_back(sub_vec);
         }
         is_scalar = false;
     }
@@ -54,15 +59,15 @@ MultiDimVector<T> MultiDimVector<T>::array(const ArrayBuilder<T>& builder)
 }
 
 template<typename T>
-T& MultiDimVector<T>::value(const std::vector<size_t>& indices)
+IndexProxy<T> MultiDimVector<T>::operator[](size_t index)
 {
-    return get_element(indices);
+    return IndexProxy<T>(*this, {index});
 }
 
 template<typename T>
-const T& MultiDimVector<T>::value(const std::vector<size_t>& indices) const
+const IndexProxy<T> MultiDimVector<T>::operator[](size_t index) const
 {
-    return get_element(indices);
+    return IndexProxy<T>(*this, {index});
 }
 
 template<typename T>
@@ -218,6 +223,102 @@ void MultiDimVector<T>::display(std::ostream& os, int depth) const
     os << "]";
 }
 
+template<>
+void MultiDimVector<std::string>::display(std::ostream& os, int depth) const
+{
+    std::string indent(depth * 2, ' ');
+    os << indent << "[";
+
+    if (is_scalar)
+    {
+        if (flat_data.empty())
+        {
+            os << "empty";
+        }
+        else
+        {
+            for (size_t i = 0; i < flat_data.size(); ++i)
+            {
+                os << "\"" << flat_data[i] << "\"";
+                if (i < flat_data.size() - 1)
+                {
+                    os << ", ";
+                }
+            }
+        }
+    }
+    else
+    {
+        if (nested_data.empty())
+        {
+            os << "empty";
+        }
+        else
+        {
+            os << "\n";
+            for (size_t i = 0; i < nested_data.size(); ++i)
+            {
+                nested_data[i].display(os, depth + 1);
+                if (i < nested_data.size() - 1)
+                {
+                    os << ",";
+                }
+                os << "\n";
+            }
+            os << indent;
+        }
+    }
+    os << "]";
+}
+
+template<>
+void MultiDimVector<char>::display(std::ostream& os, int depth) const
+{
+    std::string indent(depth * 2, ' ');
+    os << indent << "[";
+
+    if (is_scalar)
+    {
+        if (flat_data.empty())
+        {
+            os << "empty";
+        }
+        else
+        {
+            for (size_t i = 0; i < flat_data.size(); ++i)
+            {
+                os << "'" << flat_data[i] << "'";
+                if (i < flat_data.size() - 1)
+                {
+                    os << ", ";
+                }
+            }
+        }
+    }
+    else
+    {
+        if (nested_data.empty())
+        {
+            os << "empty";
+        }
+        else
+        {
+            os << "\n";
+            for (size_t i = 0; i < nested_data.size(); ++i)
+            {
+                nested_data[i].display(os, depth + 1);
+                if (i < nested_data.size() - 1)
+                {
+                    os << ",";
+                }
+                os << "\n";
+            }
+            os << indent;
+        }
+    }
+    os << "]";
+}
+
 template<typename T>
 void MultiDimVector<T>::print() const 
 {
@@ -297,7 +398,7 @@ MultiDimVector<T> MultiDimVector<T>::reshape(const MultiDimVector<T>& input, con
     result.nested_data.clear();
     result.is_scalar = false;
     
-    if (new_shape.size() == 1)
+    if(new_shape.size() == 1)
     {
         result.flat_data = flat;
         result.is_scalar = true;
@@ -334,5 +435,121 @@ MultiDimVector<T> MultiDimVector<T>::reshape(const MultiDimVector<T>& input, con
     }
     
     result.print();
+    return result;
+}
+
+//----------------------------------------------------------------------------
+// Fonction utilitaire pour vérifier la compatibilité des formes
+template<typename T>
+void MultiDimVector<T>::check_compatible_shapes(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2) const {
+    if(shape1 != shape2) 
+    {
+        std::ostringstream ss;
+        ss << "Erreur de valeur : incompatibilité de forme : les objets ne peuvent pas être diffusés à une seule forme. ";
+        ss << "Forme 1 : (";
+        for(size_t i = 0; i < shape1.size(); ++i) 
+        {
+            ss << shape1[i];
+            if(i < shape1.size() - 1) 
+            {
+                ss << ", ";
+            }  
+        }
+        ss << "), Forme 2 : (";
+        for(size_t i = 0; i < shape2.size(); ++i) 
+        {
+            ss << shape2[i];
+            if(i < shape2.size() - 1) ss << ", ";
+        }
+        ss << ")";
+        throw std::invalid_argument(ss.str());
+    }
+}
+
+// Opérateur d'addition
+template<typename T>
+MultiDimVector<T> MultiDimVector<T>::operator+(const MultiDimVector<T>& other) const 
+{
+    check_compatible_shapes(original_shape, other.original_shape);
+    MultiDimVector<T> result;
+    if(is_scalar) 
+    {
+        result.is_scalar = true;
+        result.original_shape = original_shape;
+        result.flat_data.resize(flat_data.size());
+        for(size_t i = 0; i < flat_data.size(); ++i) 
+        {
+            result.flat_data[i] = flat_data[i] + other.flat_data[i];
+        }
+    } 
+    else 
+    {
+        result.is_scalar = false;
+        result.original_shape = original_shape;
+        result.nested_data.resize(nested_data.size());
+        for(size_t i = 0; i < nested_data.size(); ++i) 
+        {
+            result.nested_data[i] = nested_data[i] + other.nested_data[i];
+        }
+    }
+    return result;
+}
+
+// Opérateur de soustraction
+template<typename T>
+MultiDimVector<T> MultiDimVector<T>::operator-(const MultiDimVector<T>& other) const 
+{
+    check_compatible_shapes(original_shape, other.original_shape);
+    MultiDimVector<T> result;
+
+    if(is_scalar) 
+    {
+        result.is_scalar = true;
+        result.original_shape = original_shape;
+        result.flat_data.resize(flat_data.size());
+        for(size_t i = 0; i < flat_data.size(); ++i) 
+        {
+            result.flat_data[i] = flat_data[i] - other.flat_data[i];
+        }
+    }
+    else 
+    {
+        result.is_scalar = false;
+        result.original_shape = original_shape;
+        result.nested_data.resize(nested_data.size());
+        for(size_t i = 0; i < nested_data.size(); ++i) 
+        {
+            result.nested_data[i] = nested_data[i] - other.nested_data[i];
+        }
+    }
+    return result;
+}
+
+// Opérateur de multiplication (élément par élément)
+template<typename T>
+MultiDimVector<T> MultiDimVector<T>::operator*(const MultiDimVector<T>& other) const 
+{
+    check_compatible_shapes(original_shape, other.original_shape);
+    MultiDimVector<T> result;
+    if(is_scalar) 
+    {
+        result.is_scalar = true;
+        result.original_shape = original_shape;
+        result.flat_data.resize(flat_data.size());
+        for(size_t i = 0; i < flat_data.size(); ++i) 
+        {
+            result.flat_data[i] = flat_data[i] * other.flat_data[i];
+        }
+    } 
+    else 
+    {
+        result.is_scalar = false;
+        result.original_shape = original_shape;
+        result.nested_data.resize(nested_data.size());
+        for(size_t i = 0; i < nested_data.size(); ++i) 
+        {
+            result.nested_data[i] = nested_data[i] * other.nested_data[i];
+        }
+    }
     return result;
 }
