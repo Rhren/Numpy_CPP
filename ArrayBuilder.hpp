@@ -1,9 +1,8 @@
-
 #ifndef ARRAY_BUILDER_HPP
 #define ARRAY_BUILDER_HPP
-
 #include <vector>
 #include <stdexcept>
+
 
 template<typename U> class MultiDimVector;
 template<typename T>
@@ -16,7 +15,6 @@ class ArrayBuilder
 
         template<typename U>
         void validate_uniform_size(const std::vector<ArrayBuilder<U>>& vec) const;
-
     public:
         ArrayBuilder(const std::initializer_list<T>& list);
         ArrayBuilder(const std::initializer_list<ArrayBuilder<T>>& list);
